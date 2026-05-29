@@ -2,6 +2,7 @@ library(tidyverse)
 library(fitdistrplus)
 library(foreach)
 library(doParallel)
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
 
 # ==========================================
 # 1. LOAD AND PRE-PROCESS DATA
@@ -273,3 +274,54 @@ weibull_param_summary <- full_join(
 
 write_csv(weibull_param_summary, "weibull_parameters_trend_analysis.csv")
 
+
+
+
+library(tidyverse)
+library(car) # For Type III ANOVA if your data is unbalanced
+
+# 1. Read your parameter table
+param_data <- read_csv("weibull_parameters_trend_analysis.csv")
+model_df <- param_data %>%
+  mutate(
+    Decade  = as.factor(Decade),
+    Region  = as.factor(Region),
+    Age_Bin = as.numeric(Age_Bin)
+  )
+
+# Has stand uniformity (DBH Shape) changed over decades?
+dbh_shape_model <- lm(dbh_shape ~ Region + Age_Bin + Decade, data = model_df)
+# Has the population size-profile (DBH Scale) shifted?
+dbh_scale_model <- lm(dbh_scale ~ Region + Age_Bin + Decade, data = model_df)
+
+# GENERATE TREND SUMMARY TABLES AND EXPORT TO CSV
+decade_summary <- model_df %>%
+  group_by(Decade) %>%
+  summarise(
+    `Mean_DBH_Uniformity_(Shape)` = mean(dbh_shape, na.rm = TRUE),
+    `Mean_Relative_Size_(Scale)`  = mean(dbh_scale, na.rm = TRUE),
+    Total_Observations            = n()
+  )
+
+shape_anova_df <- as.data.frame(Anova(dbh_shape_model, type = "III")) %>%
+  rownames_to_column("Term") %>%
+  mutate(Analysis = "DBH Shape (Uniformity) ANOVA")
+
+scale_anova_df <- as.data.frame(Anova(dbh_scale_model, type = "III")) %>%
+  rownames_to_column("Term") %>%
+  mutate(Analysis = "DBH Scale (Size Profile) ANOVA")
+
+# Format the decade summary table to match the layout
+summary_df <- model_df %>%
+  group_by(Decade) %>%
+  summarise(
+    `Mean_DBH_Uniformity_(Shape)` = mean(dbh_shape, na.rm = TRUE),
+    `Mean_Relative_Size_(Scale)`  = mean(dbh_scale, na.rm = TRUE),
+    Total_Observations            = n()
+  ) %>%
+  rename(Term = Decade) %>%
+  mutate(Analysis = "Decade Trend Summary")
+
+# Combine everything and save to one file
+unified_output <- bind_rows(shape_anova_df, scale_anova_df, summary_df)
+write_csv(unified_output, "statistical_analysis_results.csv")
